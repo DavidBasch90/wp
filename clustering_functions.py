@@ -2,11 +2,12 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import os
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from fancyimpute import IterativeImputer
 from sklearn.metrics import silhouette_score, pairwise_distances
-from sklearn.cluster import KMeans, AgglomerativeClustering
+from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN
 from sklearn.metrics import silhouette_score
 from sklearn_extra.cluster import KMedoids
 from scipy.spatial import distance
@@ -14,23 +15,49 @@ from sklearn.neighbors import kneighbors_graph
 from scipy.spatial.distance import pdist, squareform
 
 def get_best_model(df):
+    #set weights
     weights = {
         'silhouette_avg':1,
         'avg_connectivity':1,
         'dunn_index':1
     }
-    #apply weights
+    #apply weights and apply min-max normalisation to the resulting metrics to make sure the metrics are scaled
     for measure, weight in weights.items():
+        df[measure] = (df[measure]-df[measure].min()) / (df[measure].max() - df[measure].min())
         df[measure] *= weight
     #calculate the weighted score
     max_distance = df["avg_connectivity"].max()
     df['score'] =df['silhouette_avg']+df['dunn_index']-df["avg_connectivity"]
     best_model = df.loc[df['score'].idxmax()]
-
+    #output
     df.to_csv('./output/clustering_tests/clustering_results.csv', index=False)
 
     return best_model
 
+
+def visualise_clusters(name,df, labels, method, n_clusters):
+    #reduce dim
+    pca = PCA(n_components=2)
+    reduced_data = pca.fit_transform(df)
+
+    #create the DF for the reduced data
+    reduced_df = pd.DataFrame(reduced_data, columns=['PC1','PC2'])
+
+    #add cluster labels
+    reduced_df['cluster'] = labels
+    
+    #create scatterplot of clusters
+    plt.figure(figsize=(10,7))
+    sns.scatterplot(data=reduced_df, x='PC1', y='PC2', hue='cluster', palette='viridis')
+
+    directory = f'./output/clustering_tests/{method}/{name}/'
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    #save the fig
+    plt.savefig(f'./output/clustering_tests/{method}/{name}/{name}_{method}_{n_clusters}_clusters.png')
+
+    plt.close()
 
 def clustering_tests(wimd_25,wimd_28,wimd_pc_8,wimd_pc_12):
 
@@ -48,9 +75,11 @@ def clustering_tests(wimd_25,wimd_28,wimd_pc_8,wimd_pc_12):
             for model_name, model in [
                 ("kmeans", KMeans(n_clusters=n_clusters, random_state=123)),
                 ("agnes", AgglomerativeClustering(n_clusters=n_clusters)),
-                ("kmeds", KMedoids(n_clusters=n_clusters, random_state=123))
+                ("kmeds", KMedoids(n_clusters=n_clusters, random_state=123)),
+                ("dbscan", DBSCAN(eps=0.002,min_samples=2))
             ]:
                 labels = model.fit_predict(data)
+                n_clusters = len(np.unique(labels))
                 silhouette_avg = silhouette_score(data, labels)
                 ##n_neighbors are not clusters - 
                 connectivity = kneighbors_graph(data, n_neighbors=n_clusters).toarray()
@@ -90,6 +119,8 @@ def clustering_tests(wimd_25,wimd_28,wimd_pc_8,wimd_pc_12):
                     "dunn_index": dunn_index
                 })
 
+                visualise_clusters(name,data,labels,model_name,n_clusters)
+
     results_df = pd.DataFrame(results)
 
     # Plotting
@@ -102,6 +133,10 @@ def clustering_tests(wimd_25,wimd_28,wimd_pc_8,wimd_pc_12):
     
     best_model = get_best_model(results_df)
     print(best_model)
+
+    
+    
+
 
 
 def run_travel_pcab(df, keep_travel_vars=False):
